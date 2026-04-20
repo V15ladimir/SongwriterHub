@@ -1,0 +1,211 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+@using X.PagedList.Mvc.Core
+@model X.PagedList.IPagedList<Song>
+
+<form asp-controller="Home" asp-action="Index" method="get" id="langForm">
+    <div class="d-flex flex-column flex-md-row gap-2 gap-md-3 mb-3 align-items-md-center" role="toolbar">
+        <div class="btn-group" role="group" style="width: auto;">
+            <input type="hidden" name="page" value="1" />
+            <select class="form-select form-select-sm border-secondary text-secondary" name="lang" id="langSelect">
+                <option value="en_US">English</option>
+                <option value="ko">Korean</option>
+            </select>
+        </div>
+        <div class="input-group w-auto">
+            <input type="number" id="seedInput" name="seed" class="form-control form-control-sm border-secondary text-secondary"
+                value="@ViewBag.CurrentSeed" min="0" max="18446744073709551615" step="1" style="width: 180px;">
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="randomSeedBtn">
+                <i class="bi bi-shuffle"></i>
+            </button>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <div class="input-group" style="width: 200px;">
+                <input type="range" name="likes" class="form-range" id="likesRange"
+                       value="@ViewBag.AvgLikes.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                       min="0" max="10" step="0.1">
+            </div>
+            <span class="badge bg-secondary">@ViewBag.AvgLikes.ToString("0.0")</span>
+        </div>
+        <div class="btn-group ms-md-auto" role="group">
+            <button type="button" class="btn btn-outline-secondary btn-sm active" id="tableViewBtn">Table</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="galleryViewBtn">Gallery</button>
+        </div>
+    </div>
+</form>
+<div id="tableView">
+    <table class="table table-borderless table-hover table-sm">
+        <thead>
+            <tr>
+                <th scope="col">#</th>
+                <th scope="col">Song</th>
+                <th scope="col">Artist</th>
+                <th scope="col">Album</th>
+                <th scope="col">Genre</th>
+            </tr>
+        </thead>
+        <tbody class="table-group-divider">
+        @foreach(var song in Model) {
+            <tr data-bs-toggle="collapse" data-bs-target="#@song.Id">
+                <th scope="row">@song.Id</th>
+                <td>@song.Title</td>
+                <td>@song.Artist</td>
+                <td>@song.Album</td>
+                <td>@song.Genre</td>
+            </tr>
+            <tr id="@song.Id" class="collapse">
+                <td colspan="5">
+                    <div class="card card-body">
+                        <div class="d-flex flex-column flex-md-row align-items-stretch">
+                            <div class="d-flex flex-column flex-shrink-0 h-100">
+                                <img class="rounded-5" src="@Url.Action("CoverIcon", song)" alt="...">
+                                <midi-player class="mt-3 w-100" src="@Url.Action("GenerateAudio", new { id = song.Id, seed = ViewBag.CurrentSeed })"></midi-player>
+                            </div>
+                            <div class="flex-grow-1 ms-0 ms-md-4 mt-3 mt-md-0">
+                                <div class="overflow-auto text-bg-light rounded-5 p-3" style="max-height: 306px; height: 100%;">
+                                    <div class="d-flex flex-column gap-2">
+                                        @foreach(var lyric in song.Lyrics) {
+                                            <p class="text-sm-start text-secondary mb-0" style="white-space: pre-wrap;">@lyric</p>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="d-flex align-items-center justify-content-end mt-3 gap-1 text-muted">
+                                    <i class="bi bi-heart-fill text-danger" style="font-size: 0.9rem;"></i>
+                                    <span class="fw-semibold small">@song.Likes</span>
+                                    <span class="small text-secondary">likes</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    @Html.PagedListPager(
+        Model,
+        page => Url.Action("Index", new { page, lang = ViewBag.CurrentLang }),
+        new PagedListRenderOptions {
+            MaximumPageNumbersToDisplay = 3,
+            DisplayLinkToPreviousPage = PagedListDisplayMode.Never,
+            DisplayLinkToNextPage = PagedListDisplayMode.Never,
+            DisplayEllipsesWhenNotShowingAllPageNumbers = false,
+            UlElementClasses = new[] { "pagination", "pagination-sm", "justify-content-center" },
+            LiElementClasses = new[] { "page-item" },
+            PageClasses = new[] { "page-link" }
+        })
+</div>
+<div id="galleryView" style="display: none;">
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4" id="galleryContainer">
+        @await Html.PartialAsync("_SongsGalleryItems", Model)
+    </div>
+    <div id="loadingIndicator" class="text-center my-4" style="display: none;">
+        <div class="spinner-border text-primary"></div>
+    </div>
+</div>
+<script>
+    let page = @Model.PageNumber;
+    let loading = false;
+    let active = false;
+    let currentSeed = document.getElementById('seedInput').value;
+    let currentLang = document.getElementById('langSelect').value;
+    let currentLikes = document.getElementById('likesRange').value;
+
+    function updateBadge(value) {
+        const badge = document.querySelector('.badge.bg-secondary');
+        if (badge) {
+            badge.textContent = parseFloat(value).toFixed(1);
+        }
+    }
+
+    function load() {
+        if (loading) return;
+        loading = true;
+        document.getElementById('loadingIndicator').style.display = 'block';
+        fetch(`/Home/LoadGallery?page=${page + 1}&seed=${currentSeed}&lang=${currentLang}&likes=${currentLikes}`)
+            .then(res => res.text())
+            .then(html => {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                if (html.trim()) {
+                    document.getElementById('galleryContainer').insertAdjacentHTML('beforeend', html);
+                    page++;
+                }
+                loading = false;
+            })
+            .catch(err => {
+                console.error('Error loading more songs:', err);
+                loading = false;
+                document.getElementById('loadingIndicator').style.display = 'none';
+            });
+    }
+
+    document.getElementById('likesRange').oninput = () => {
+        document.getElementById('likesLabel').innerText = document.getElementById('likesRange').value;
+    };
+
+    document.getElementById('randomSeedBtn').addEventListener('click', function() {
+        fetch('/Home/GenerateSeed')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('seedInput').value = data.seed;
+                apply();
+            });
+        });
+
+    const apply = () => {
+        currentSeed = document.getElementById('seedInput').value;
+        currentLang = document.getElementById('langSelect').value;
+        currentLikes = document.getElementById('likesRange').value;
+        updateBadge(currentLikes);
+        if (active) {
+            document.getElementById('galleryContainer').innerHTML = '';
+            page = 1;
+            load();
+        } else {
+            document.getElementById('langForm').submit();
+        }
+    };
+
+    document.getElementById('langSelect').onchange = (e) => {
+        apply();
+    };
+
+    document.getElementById('seedInput').oninput = apply;
+    document.getElementById('likesRange').onchange = apply;
+
+    let scrollTimeout;
+    window.onscroll = () => {
+        if (active) {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+                if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 200) {
+                    load();
+                }
+            }, 100);
+        }
+    };
+
+    document.getElementById('galleryViewBtn').onclick = () => {
+        active = true;
+        document.getElementById('tableView').style.display = 'none';
+        document.getElementById('galleryView').style.display = 'block';
+        document.getElementById('galleryViewBtn').classList.add('active');
+        document.getElementById('tableViewBtn').classList.remove('active');
+        currentSeed = document.getElementById('seedInput').value;
+        currentLang = document.getElementById('langSelect').value;
+        currentLikes = document.getElementById('likesRange').value;
+        if (document.getElementById('galleryContainer').children.length === 0) {
+            page = 1;
+            load();
+        }
+    };
+
+    document.getElementById('tableViewBtn').onclick = () => {
+        active = false;
+        document.getElementById('tableView').style.display = 'block';
+        document.getElementById('galleryView').style.display = 'none';
+        document.getElementById('tableViewBtn').classList.add('active');
+        document.getElementById('galleryViewBtn').classList.remove('active');
+    };
+</script>
